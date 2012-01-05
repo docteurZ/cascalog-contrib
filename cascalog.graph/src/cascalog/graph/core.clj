@@ -23,15 +23,13 @@
 
 (defn in-degree
   "computes the in degrees"
-  [dir]
-  (let [vals (enumerate-edges dir)]
-    (<- [?dst ?in_d] (vals ?dst _) (:distinct false) (c/count :> ?in_d))))
+  [edges]
+  (<- [?dst ?in_d] (edges ?dst _) (:distinct false) (c/count :> ?in_d)))
 
 (defn out-degree
   "computes the out degrees"
-  [dir]
-  (let [vals (enumerate-edges dir)]
-    (<- [?src ?out_d] (vals _ ?src) (:distinct false) (c/count :> ?out_d))))
+  [edges]
+  (<- [?src ?out_d] (edges _ ?src) (:distinct false) (c/count :> ?out_d)))
 
 (defmapcatop mk-node
   [dest src]
@@ -39,16 +37,12 @@
 
 (defn enumerate-nodes
   "enumerate the nodes"
-  [dir]
-  (let [edges (enumerate-edges dir)]
-    (<- [?node] (edges ?dst ?src)
-        (mk-node ?dst ?src :> ?node)
-        (:distinct true))))
+  [edges]
+  (<- [?node] (edges ?dst ?src) (mk-node ?dst ?src :> ?node) (:distinct true)))
 
 (defn count-nodes
   "counts the number of nodes"
-  [dir]
-  (let [nodes (enumerate-nodes dir)]
-    (?<- (stdout) [?nb-nodes] (nodes ?node) (c/count ?nb-nodes))))
+  [nodes]
+  (<- [?nb-nodes] (nodes ?node) (c/count ?nb-nodes)))
 
 
