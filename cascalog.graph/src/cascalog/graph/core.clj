@@ -9,17 +9,11 @@
   (let [source (hfs-textline dir)]
     (<- [?line] (source ?line) (:distinct false))))
 
-(defn parse-line
-  "parses a line where the edgelist format is: 'src' 'dest'"
-  [line]
-  (let [[_ src dst] (re-find #"([^\s]+)\s+([^\s]+)" line)]
-    [dst src]))
-    
 (defn enumerate-edges
-  "enumates all the edges with a return tuple: '[dst src]'"
+  "enumates all the edges where the edgelist format is 'src' 'dest' and return tuples '[dst src]'"
   [dir]
   (let [line (make-file-source dir)]
-    (<- [?dst ?src] (line ?line) (parse-line ?line :> ?dst ?src))))
+    (<- [?dst ?src] (line ?line) (c/re-parse [#"[^\s]+"] ?line :> ?src ?dst) (:distinct false))))
 
 (defn in-degree
   "computes the in degrees"
@@ -43,6 +37,4 @@
 (defn count-nodes
   "counts the number of nodes"
   [nodes]
-  (<- [?nb-nodes] (nodes ?node) (c/count ?nb-nodes)))
-
-
+  (<- [?nb-nodes] (nodes ?node ) (c/distinct-count ?node :> ?nb-nodes)))
