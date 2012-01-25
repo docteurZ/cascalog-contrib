@@ -1,10 +1,11 @@
 (ns cascalog.graph.pagerank
   (:use cascalog.graph.core)
   (:use cascalog.api)
+  (:use cascalog.checkpoint)
   (:require [cascalog [ops :as c]]))
 
 (def damping 0.85)
-(def max-iteration 9)
+(def max-iteration 2)
 
 (defn init-pagerank
   "initiates the pagerank vector with: 1/nb-nodes"
@@ -14,7 +15,7 @@
 (defn mk-graph-data
   "makes the graph data structure with format: [dst src (out-d src)]"
   [edges]
-  (let [out_d (out-degree edges)]    
+  (let [out_d (out-degree edges)]
     (<- [?dst ?src ?out] (edges ?dst ?src) (out_d ?src ?out) (:distinct false))))
 
 (defn or-fn
@@ -28,7 +29,7 @@
   (let [damping-out-factor (* (- 1 damping) (/ 1  nb-nodes))
         out-factor (<- [?dst ?src ?out-factor]
                        (graph-data ?dst ?src ?out)
-                       (old-pr ?src ?pr-src)         
+                       (old-pr ?src ?pr-src)
                        (div ?pr-src ?out :> ?out-factor))
         add-out (<- [?dst ?sum-out]
                     (out-factor ?dst ?src ?out-factor)
@@ -50,10 +51,11 @@
   "main function to compute the pagerank"
   [edges]
   (let [nodes (enumerate-nodes edges)
-        nb-nodes (first (first (??<- [?nb-nodes] (nodes ?node) (c/count ?nb-nodes))))
+        nb-nodes (first (first (??<- [?nb-nodes] (nodes ?node )
+                                     (c/distinct-count ?node :> ?nb-nodes))))
         pr-init (init-pagerank nodes nb-nodes)
         graph-data (mk-graph-data edges)
-        
+
         pr (loop
                [it-nb max-iteration
                 req (compute-pagerank graph-data pr-init nb-nodes)]
@@ -62,3 +64,27 @@
                req))
         ]
     pr))
+
+
+(defn big
+  [graph-data pr-init nb-nodes]
+  (workflow ["/tmp/example-checkpoint"]
+            st-1 ([:deps nil] (compute-pagerank graph-data pr-init nb-nodes))
+            (?- (stdout) st-1)
+                                        ;st-2 ([:deps st-1] (compute-pagerank graph-data st-1 nb-nodes))
+            ;(?- (stdout) st-2)
+            )
+  )
+
+(defn pagerank3
+  [edges]
+  (let [nodes (enumerate-nodes edges)
+        nb-nodes (first (first (??<- [?nb-nodes] (nodes ?node) (c/count ?nb-nodes))))
+        pr-init (init-pagerank nodes nb-nodes)
+        graph-data (mk-graph-data edges)
+        big-pagerank (big graph-data pr-init nb-nodes)
+        ]
+    big-pagerank))
+
+
+

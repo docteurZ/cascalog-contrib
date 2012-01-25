@@ -1,7 +1,9 @@
 (defproject cascalog-graph "0.1.0"
   :description "Provides well-known graph analysis tools"
-  :dependencies [[org.clojure/clojure "1.3.0"]
-                 [cascalog "1.8.3"]]
+  :dependencies [[org.clojure/clojure "1.3.0"]                
+                 [cascalog "1.8.3"]
+                 [cascalog-checkpoint "0.1.0"]
+                 ]
   :dev-dependencies [[swank-clojure "1.4.0-SNAPSHOT"]
                      [org.apache.hadoop/hadoop-core "0.20.2-dev"]
                      [lein-multi "1.1.0-SNAPSHOT"]
