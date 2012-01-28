@@ -2,7 +2,6 @@
   (:use cascalog.api)
   (:require [cascalog [ops :as c]]))
 
-
 (defn make-file-source
   "reads all the files in 'dir'"
   [dir]
@@ -43,21 +42,23 @@
 
 
 ;; util functions
-
 (defn count-nodes
   "counts the number of nodes"
   [nodes]
   (<- [?nb-nodes] (nodes ?node ) (c/distinct-count ?node :> ?nb-nodes)))
 
 (deffilterop is-loop?
+  "detect self loop"
   [dest src]
   (not= dest src))
 
 (defmapop mk-ordered-edge
+  "order the edges"
   [dest src]
   (sort [dest src]))
 
 (defn simplifying-graph
+  "remove loop and order the edges"
   [edges]
   (<- [?u ?v] (edges ?dst ?src) (is-loop? ?dst ?src)
       (mk-ordered-edge ?dst ?src :> ?u ?v)
@@ -66,3 +67,15 @@
 (defmapcatop mk-edge-triangle
   [u v w]
   [[u v] [u w] [v w]])
+
+(defn mk-two-fields-source
+  [dir]
+  (let [source (hfs-textline dir)]
+    (<- [?n ?z] (source ?line) (c/re-parse [#"[^\s]+"] ?line :> ?n ?z)
+        (:distinct false))))
+
+(defn parse-number
+  [f]
+  (if (= (class f) String)
+    (Double/parseDouble f)
+    f))

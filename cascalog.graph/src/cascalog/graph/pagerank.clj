@@ -2,10 +2,10 @@
   (:use cascalog.graph.core)
   (:use cascalog.api)
   (:use cascalog.checkpoint)
-  (:require [cascalog [ops :as c]]))
+  (:require [cascalog [ops :as c] [io :as io]]))
 
 (def damping 0.85)
-(def max-iteration 2)
+(def max-iteration 10)
 
 (defn init-pagerank
   "initiates the pagerank vector with: 1/nb-nodes"
@@ -47,9 +47,15 @@
     (<- [?node ?norm-pr] (pr ?node ?pr) (div ?pr sum-pr :>  ?norm-pr))))
 
 
+(defn mk-pr-source
+  [dir]
+  (let [source (hfs-textline dir)]
+    (<- [?n ?z] (source ?line) (c/re-parse [#"[^\s]+"] ?line :> ?n ?z-str)
+        (parse-number ?z-str :> ?z) (:distinct false))))
+
 (defn pagerank
   "main function to compute the pagerank"
-  [edges]
+  [edges tmp-dir]
   (let [nodes (enumerate-nodes edges)
         nb-nodes (first (first (??<- [?nb-nodes] (nodes ?node )
                                      (c/distinct-count ?node :> ?nb-nodes))))
@@ -57,34 +63,15 @@
         graph-data (mk-graph-data edges)
 
         pr (loop
-               [it-nb max-iteration
+               [it-nb 0
                 req (compute-pagerank graph-data pr-init nb-nodes)]
-             (if (pos? it-nb)
-               (recur (dec it-nb) (compute-pagerank graph-data req nb-nodes))
-               req))
-        ]
+             (if (<= it-nb max-iteration)
+               (let [rank-path (str tmp-dir "/pagerank/iter_" it-nb)]
+                 (?- (hfs-textline rank-path) req)
+                 (println "pagerank iteration: " it-nb "/"  max-iteration)
+                 (recur (inc it-nb) (compute-pagerank graph-data
+                                                      (mk-pr-source rank-path)
+                                                      nb-nodes)))
+               req))]
+    (io/delete-file-recursively (str tmp-dir "/pagerank"))
     pr))
-
-
-(defn big
-  [graph-data pr-init nb-nodes]
-  (workflow ["/tmp/example-checkpoint"]
-            st-1 ([:deps nil] (compute-pagerank graph-data pr-init nb-nodes))
-            (?- (stdout) st-1)
-                                        ;st-2 ([:deps st-1] (compute-pagerank graph-data st-1 nb-nodes))
-            ;(?- (stdout) st-2)
-            )
-  )
-
-(defn pagerank3
-  [edges]
-  (let [nodes (enumerate-nodes edges)
-        nb-nodes (first (first (??<- [?nb-nodes] (nodes ?node) (c/count ?nb-nodes))))
-        pr-init (init-pagerank nodes nb-nodes)
-        graph-data (mk-graph-data edges)
-        big-pagerank (big graph-data pr-init nb-nodes)
-        ]
-    big-pagerank))
-
-
-

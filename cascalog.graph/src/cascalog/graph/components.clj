@@ -6,44 +6,70 @@
 
 
 (defmapop add-class-field [x]
-  [x (str "class_" x)])
+  [x (str "C_" x)])
 
 (defn init-partition
   [edges]
   (let [nodes (enumerate-nodes edges)]
     (<-[?y ?z] (nodes ?n) (add-class-field ?n :> ?y ?z))))
 
+(defmapop mk-best-component
+  [zx zy sx sy]
+  (cond
+   (= sx sy) (first (sort [zx zy]))
+   (> sx sy) zx
+   :else zy))
+
+
+(defmapcatop mk-partition
+  [x y z]
+  [[x z] [y z]])
+
+(defn merge-components
+  [edges part size]
+  (<- [?u ?z] (edges ?x ?y) (part ?x ?zx) (part ?y ?zy)
+      (size ?zx ?sx) (size ?zy ?sy)
+      (mk-best-component ?zx ?zy ?sx ?sy :> ?zz)
+      (mk-partition ?x ?y ?zz :> ?u ?z) (:distinct true)))
+
+(defn size-components
+  [part]
+  (<- [?z ?count] (part _ ?z)  (:distinct false) (c/count :> ?count)))
+
+
+(defn union-find3
+  [edges]
+  (let [init    (init-partition edges)
+        size (size-components init)
+        merge-1 (merge-components edges init size)
+        size-1  (size-components merge-1)
+                                        ;merge-2 (merge-components merge-1)
+        ;merge-3 (merge-components merge-2)
+        ;size3   (size-components merge-2)
+        ;merge-4 (merge-components merge-3)
+        ]
+    (?- (stdout) init)
+    (?- (stdout) size)
+    (?- (stdout) merge-1)
+    (?- (stdout) size-1)
+    ;(?- (stdout) merge-2)
+    ;(?- (stdout) merge-3)
+    ;(?- (stdout) size3)
+    ;(?- (stdout) merge-4)
+    ))
+
 
 (deffilterop different-compoment? [x y] (not= x y))
 
-(defn components-to-merge
-  [edges part]
-  (<- [?zu ?zv] (edges ?u ?v) (part ?u ?zu) (part ?v ?zv)
-      (different-compoment? ?zu ?zv) (:distinct true)))
 
-(defmapop get-min
-  [x y]
-  (if (nil? y)
-    x
-    (first (sort  [x y]))))
 
-(defn mk-two-fields-source
-  [dir]
-  (let [source (hfs-textline dir)]
-    (<- [?n ?z] (source ?line) (c/re-parse [#"[^\s]+"] ?line :> ?n ?z)
-        (:distinct false))))
-
-(defn update-partition
-  [part components]
-  (<- [?u ?z] (part ?u ?zu) (components !!zv ?zu)
-      (get-min ?zu !!zv :> ?z) (:distinct true)))
 
 
 (defn union-find
   [edges]
   (let [part-init (init-partition edges)
         merge-init (components-to-merge  edges part-init)
-        count-init (first (first (??<- [?count] (merge-init ?c _) (c/distinct-count ?c :> ?count))))
+        count-init (first (first (??<- [?count] (merge-init _ ?c _ _) (c/distinct-count ?c :> ?count))))
         part (loop
                  [count count-init
                   nb-iter 0
@@ -55,7 +81,7 @@
                    (println "Components to merge: " count)
                    (?- (hfs-textline part-path) req)
                    (?- (hfs-textline merge-path)  merge)
-                   (recur (first (first (??<- [?count] (merge ?c _) (c/distinct-count ?c :> ?count))))
+                   (recur (first (first (??<- [?count] (merge _ ?c _ _) (c/distinct-count ?c :> ?count))))
                           (inc nb-iter)
                           (update-partition (mk-two-fields-source part-path)
                                             (mk-two-fields-source merge-path))
