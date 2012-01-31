@@ -18,11 +18,6 @@
   (let [out_d (out-degree edges)]
     (<- [?dst ?src ?out] (edges ?dst ?src) (out_d ?src ?out) (:distinct false))))
 
-(defn or-fn
-  "basic function or"
-  [cl1 cl2]
-  (or cl1 cl2))
-
 (defn compute-pagerank
   "computes and normalizes pr for each nodes for a given iteration"
   [graph-data old-pr nb-nodes]

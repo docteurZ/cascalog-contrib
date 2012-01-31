@@ -2,92 +2,102 @@
   (:use cascalog.graph.core)
   (:use cascalog.api)
   (:use cascalog.checkpoint)
-  (:require [cascalog [ops :as c]]))
+  (:require [cascalog [ops :as c] [io :as io]]))
 
+(def max-iteration 20)
 
 (defmapop add-class-field [x]
   [x (str "C_" x)])
 
 (defn init-partition
-  [edges]
-  (let [nodes (enumerate-nodes edges)]
-    (<-[?y ?z] (nodes ?n) (add-class-field ?n :> ?y ?z))))
-
-(defmapop mk-best-component
-  [zx zy sx sy]
-  (cond
-   (= sx sy) (first (sort [zx zy]))
-   (> sx sy) zx
-   :else zy))
+  "At the init, each node belongs to a different component"
+  [graph]
+  (let [nodes (enumerate-nodes graph)]
+    (<- [?y ?z] (nodes ?n) (add-class-field ?n :> ?y ?z))))
 
 
-(defmapcatop mk-partition
-  [x y z]
-  [[x z] [y z]])
-
-(defn merge-components
-  [edges part size]
-  (<- [?u ?z] (edges ?x ?y) (part ?x ?zx) (part ?y ?zy)
-      (size ?zx ?sx) (size ?zy ?sy)
-      (mk-best-component ?zx ?zy ?sx ?sy :> ?zz)
-      (mk-partition ?x ?y ?zz :> ?u ?z) (:distinct true)))
-
-(defn size-components
-  [part]
-  (<- [?z ?count] (part _ ?z)  (:distinct false) (c/count :> ?count)))
-
-
-(defn union-find3
-  [edges]
-  (let [init    (init-partition edges)
-        size (size-components init)
-        merge-1 (merge-components edges init size)
-        size-1  (size-components merge-1)
-                                        ;merge-2 (merge-components merge-1)
-        ;merge-3 (merge-components merge-2)
-        ;size3   (size-components merge-2)
-        ;merge-4 (merge-components merge-3)
-        ]
-    (?- (stdout) init)
-    (?- (stdout) size)
-    (?- (stdout) merge-1)
-    (?- (stdout) size-1)
-    ;(?- (stdout) merge-2)
-    ;(?- (stdout) merge-3)
-    ;(?- (stdout) size3)
-    ;(?- (stdout) merge-4)
-    ))
+(defn init-size
+  "optim for the init"
+  [graph]
+  (let [out (out-degree graph)]
+    (<- [?z ?count] (out ?u ?count) (str "C_" ?u :> ?z))))
 
 
 (deffilterop different-compoment? [x y] (not= x y))
 
+(defn components-to-merge
+  "computes the components to merge"
+  [graph part]
+  (<- [?zu ?zv] (graph ?u ?v) (part ?u ?zu) (part ?v ?zv)
+      (different-compoment? ?zu ?zv) (:distinct true)))
+
+(defn size-components
+  "computes the size of each component"
+  [part]
+  (<- [?z ?count] (part _ ?z)  (:distinct false) (c/count :> ?count)))
 
 
+(defbufferop sort-components
+  "sort by value then by key"
+  [tuples]
+  (let [all (reduce (fn [acc [zu zv su sv]]
+                      (assoc acc zu (parse-number su) zv (parse-number sv))) {} tuples)]
+     [(first (first (reverse (sort-by
+                              (fn [[k v]] [v k]) all))))]))
+
+(defn update-partition
+  "computes the node which has an update or partition"
+  [part components size]
+  (<- [?u  ?z] (part ?u ?zu) (components ?zu ?zv)
+      (size ?zu ?su) (size ?zv ?sv)
+      (sort-components ?zu ?zv ?su ?sv :> ?z)
+      (:distinct true)))
+
+
+(defn merge-partition
+  "merge the old partition with the updates"
+  [old-part updates]
+  (<- [?u ?z] (old-part ?u ?zu)
+      (updates ?u !!zv)
+      (or-fn !!zv ?zu  :> ?z) (:distinct true)))
 
 
 (defn union-find
-  [edges]
-  (let [part-init (init-partition edges)
-        merge-init (components-to-merge  edges part-init)
-        count-init (first (first (??<- [?count] (merge-init _ ?c _ _) (c/distinct-count ?c :> ?count))))
-        part (loop
-                 [count count-init
-                  nb-iter 0
-                  req   (update-partition part-init merge-init)
-                  merge (components-to-merge edges part-init)]
-               (if (and (> count 1) (< nb-iter 10))
-                 (let [part-path  (str "/tmp/findc/partition_" nb-iter)
-                       merge-path (str "/tmp/findc/component_" nb-iter)]
-                   (println "Components to merge: " count)
-                   (?- (hfs-textline part-path) req)
+  [edges tmp-dir]
+  (let [graph (symetrize-graph edges)
+        part-init (init-partition graph)
+        part (loop [count (first (first (??<- [?count] (part-init ?n _)
+                                              (c/distinct-count ?n :> ?count))))
+                    nb-iter 0
+                    size (init-size graph)
+                    merge (components-to-merge graph part-init)
+                    update (update-partition part-init merge size)
+                    req (merge-partition part-init update)]
+               (if (and (not (nil? count)) (< nb-iter max-iteration))
+                 (let [size-path  (str tmp-dir "/findc/size_" nb-iter)
+                       merge-path (str tmp-dir "/findc/merge_" nb-iter)
+                       update-path (str tmp-dir "/findc/update_" nb-iter)
+                       part-path  (str tmp-dir "/findc/partition_" nb-iter)]
+                   (println "Components to merge: " count
+                            " iteration: " nb-iter "/" max-iteration)
+                   (?- (hfs-textline size-path) size)
                    (?- (hfs-textline merge-path)  merge)
-                   (recur (first (first (??<- [?count] (merge _ ?c _ _) (c/distinct-count ?c :> ?count))))
-                          (inc nb-iter)
-                          (update-partition (mk-two-fields-source part-path)
-                                            (mk-two-fields-source merge-path))
-                          (components-to-merge edges (mk-two-fields-source part-path))))
+                   (?- (hfs-textline update-path) update)
+                   (?- (hfs-textline part-path) req)
+                   (recur
+                    (first (first (??<- [?count] (merge ?c _) (c/distinct-count ?c :> ?count))))
+                    (inc nb-iter)
+                    (size-components  (mk-two-fields-source part-path))
+                    (components-to-merge graph (mk-two-fields-source part-path))
+                    (update-partition (mk-two-fields-source part-path)
+                                      (mk-two-fields-source merge-path)
+                                      (mk-two-fields-source size-path))
+                    (merge-partition (mk-two-fields-source part-path)
+                                     (mk-two-fields-source update-path))))
                  req))]
+    (io/delete-file-recursively (str tmp-dir "/findc"))
     part))
+
 
 
 

@@ -64,6 +64,19 @@
       (mk-ordered-edge ?dst ?src :> ?u ?v)
       (:distinct true)))
 
+
+(defmapcatop mk-reverse-edge
+  [u v]
+  [[u v] [v u]])
+
+(defn symetrize-graph
+  "build an undirected graph from a list of edges"
+  [edges]
+  (<- [?u ?v] (edges ?dst ?src) (is-loop? ?dst ?src)
+      (mk-reverse-edge ?dst ?src :> ?u ?v)
+      (:distinct true)))
+
+
 (defmapcatop mk-edge-triangle
   [u v w]
   [[u v] [u w] [v w]])
@@ -75,7 +88,13 @@
         (:distinct false))))
 
 (defn parse-number
+  "parse a number"
   [f]
   (if (= (class f) String)
     (Double/parseDouble f)
     f))
+
+(defn or-fn
+  "basic function or"
+  [cl1 cl2]
+  (or cl1 cl2))
